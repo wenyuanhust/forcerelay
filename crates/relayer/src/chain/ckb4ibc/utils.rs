@@ -42,6 +42,7 @@ use ibc_relayer_types::timestamp::Timestamp;
 use ibc_relayer_types::Height;
 use itertools::Itertools;
 use tiny_keccak::{Hasher, Keccak};
+use tracing::info;
 
 use super::extractor::{
     extract_channel_end_from_tx, extract_connections_from_tx, extract_packet_from_tx, get_envelope,
@@ -544,6 +545,9 @@ struct AxonObjectProof {
     pub proof_payload: VerifyProofPayload,
 }
 
+use std::fs::File;
+use std::io::Write;
+
 pub async fn generate_tx_proof_from_block(
     rpc_client: &impl CkbReader,
     tx_hash: &H256,
@@ -612,7 +616,7 @@ pub async fn generate_tx_proof_from_block(
 
     let proof_payload = VerifyProofPayload {
         verify_type: 1, // to verify witness
-        transactions_root: header.inner.transactions_root.into(),
+        transactions_root: header.inner.transactions_root.clone().into(),
         witnesses_root,
         raw_transactions_root,
         proof: Proof {
@@ -635,9 +639,15 @@ pub async fn generate_tx_proof_from_block(
         proof_payload,
     };
 
+    let object_proof = object_proof.encode();
+    let hex_object_proof: String = object_proof.iter().map(|b| format!("{:02x}", b)).collect::<Vec<String>>().join("");
+    let file_name = format!("{}.txt", header.inner.transactions_root.clone());
+    let mut file = File::create(file_name).unwrap();
+    writeln!(file, "0x{}", hex_object_proof).unwrap();
+    info!("AxonObjectProof: 0x{}, len: {}, transactions_root: {}", &hex_object_proof[0..200], hex_object_proof.len(), header.inner.transactions_root);
     // assemble ibc-compatible proof
     let block_number = Height::from_noncosmos_height(header.inner.number.into());
-    let proofs = get_ibc_merkle_proof(block_number, object_proof.encode())?;
+    let proofs = get_ibc_merkle_proof(block_number, object_proof)?;
     Ok(Some(proofs))
 }
 
@@ -653,4 +663,16 @@ fn jsonrpc_merkle_root(
     .root(&leaves)
     .map(|v| v.unpack().into())
     .ok_or(Error::other_error("invalid merkle proof".to_owned()))
+}
+
+#[test]
+fn test_vec() {
+    let bytes: Vec<u8> = vec![10, 3, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+    println!("1: {:#?}", bytes);
+    println!("2: {:x?}", bytes);
+    let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect::<Vec<String>>().join("");
+    println!("3: {}", hex);
+
+    let transactions_root = H256::from_str("71a7ba8fc96349fea0ed3a5c47992e3b4084b031a42264a018e0072e8172e46c").unwrap();
+    println!("transactions_root: {}", transactions_root);
 }
